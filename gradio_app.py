@@ -253,6 +253,17 @@ def generation_all(
     check_box_rembg=False,
     num_chunks=200000,
     randomize_seed: bool = False,
+    multiview_res=512,
+    multiview_front=True,
+    multiview_right=True,
+    multiview_back=True,
+    multiview_left=True,
+    multiview_top=True,
+    multiview_bottom=True,
+    multiview_front_right=False,
+    multiview_back_right=False,
+    multiview_back_left=False,
+    multiview_front_left=False,
 ):
     start_time_0 = time.time()
     mesh, image, save_folder, stats, seed = _gen_shape(
@@ -284,7 +295,19 @@ def generation_all(
     stats['time']['face reduction'] = time.time() - tmp_time
 
     tmp_time = time.time()
-    textured_mesh = texgen_worker(mesh, image)
+    multiview_image_keys = {
+        "front": multiview_front,
+        "right": multiview_right,
+        "back": multiview_back,
+        "left": multiview_left,
+        "top": multiview_top,
+        "bottom": multiview_bottom,
+        "front-right": multiview_front_right,
+        "back-right": multiview_back_right,
+        "back-left": multiview_back_left,
+        "front-left": multiview_front_left,
+    }
+    textured_mesh = texgen_worker(mesh, image, multiview_res, multiview_image_keys)
     logger.info("---Texture Generation takes %s seconds ---" % (time.time() - tmp_time))
     stats['time']['texture generation'] = time.time() - tmp_time
     stats['time']['total'] = time.time() - start_time_0
@@ -387,7 +410,23 @@ def build_app():
         width: 20px;
     }
 
+    .force-row { display: flex; flex-direction: row; gap: 1rem; flex-wrap: nowrap; overflow-x: auto; } 
+    .column { flex: 1; min-width: 200px; }
+    .checkbox { max-width: 50px; }
     """
+
+    multiview_image_keys = {
+        "front": None,
+        "right": None,
+        "back": None,
+        "left": None,
+        "top": None,
+        "bottom": None,
+        "front-right": None,
+        "back-right": None,
+        "back-left": None,
+        "front-left": None,
+    }
 
     with gr.Blocks(theme=gr.themes.Base(), title='Hunyuan-3D-2.0', analytics_enabled=False, css=custom_css) as demo:
         gr.HTML(title_html)
@@ -457,6 +496,27 @@ def build_app():
                             cfg_scale = gr.Number(value=5.0, label='Guidance Scale', min_width=100)
                             num_chunks = gr.Slider(maximum=5000000, minimum=1000, value=8000,
                                                    label='Number of Chunks', min_width=100)
+                        
+                        # Texture Generation Options    
+                        multiview_res = gr.Slider(maximum=4096, minimum=256, value=512, label='Multiview Texgen Resolution')
+
+                        with gr.Row(elem_classes="force-row"):
+                            with gr.Column(elem_classes="column"):
+                                gr.Markdown("**Primary Views**")
+                                multiview_image_keys["front"] = gr.Checkbox(elem_classes="checkbox", label='Front View', value=True)
+                                multiview_image_keys["right"] = gr.Checkbox(elem_classes="checkbox", label='Right View', value=True)
+                                multiview_image_keys["back"] = gr.Checkbox(elem_classes="checkbox", label='Back View', value=True)
+                                multiview_image_keys["left"] = gr.Checkbox(elem_classes="checkbox", label='Left View', value=True)
+                                multiview_image_keys["top"] = gr.Checkbox(elem_classes="checkbox", label='Top View', value=True)
+                                multiview_image_keys["bottom"] = gr.Checkbox(elem_classes="checkbox", label='Bottom View', value=True)
+                            
+                            with gr.Column(elem_classes="column"):
+                                gr.Markdown("**Diagonal Views**")
+                                multiview_image_keys["front-right"] = gr.Checkbox(label='Front Right View', value=False)
+                                multiview_image_keys["back-right"] = gr.Checkbox(label='Back Right View', value=False)
+                                multiview_image_keys["back-left"] = gr.Checkbox(label='Back Left View', value=False)
+                                multiview_image_keys["front-left"] = gr.Checkbox(label='Front Left View', value=False)
+                            
                     with gr.Tab("Export", id='tab_export'):
                         with gr.Row():
                             file_type = gr.Dropdown(label='File Type', choices=SUPPORTED_FORMATS,
@@ -565,6 +625,8 @@ def build_app():
                 check_box_rembg,
                 num_chunks,
                 randomize_seed,
+                multiview_res,
+                *multiview_image_keys.values(),
             ],
             outputs=[file_out, file_out2, html_gen_mesh, stats, seed]
         ).then(

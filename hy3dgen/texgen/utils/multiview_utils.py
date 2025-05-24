@@ -23,9 +23,10 @@ from diffusers import EulerAncestralDiscreteScheduler, LCMScheduler
 
 
 class Multiview_Diffusion_Net():
+    
     def __init__(self, config) -> None:
         self.device = config.device
-        self.view_size = 512
+        self.view_size = config.multiview_resolution
         multiview_ckpt_path = config.multiview_ckpt_path
 
         current_file_path = os.path.abspath(__file__)
@@ -47,6 +48,9 @@ class Multiview_Diffusion_Net():
         pipeline.set_progress_bar_config(disable=True)
         self.pipeline = pipeline.to(self.device)
 
+    def update_config(self, config):
+        self.view_size = config.multiview_resolution
+
     def seed_everything(self, seed):
         random.seed(seed)
         np.random.seed(seed)
@@ -54,6 +58,8 @@ class Multiview_Diffusion_Net():
         os.environ["PL_GLOBAL_SEED"] = str(seed)
 
     def __call__(self, input_images, control_images, camera_info):
+        print(f"Num Input images: {len(input_images)}, Num Mesh Control Image Sets: {len(control_images) // 2}")
+        print(f"Number of cameras in batch: {len(camera_info)}")
 
         self.seed_everything(0)
 

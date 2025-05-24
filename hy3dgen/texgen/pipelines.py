@@ -37,10 +37,12 @@ class Hunyuan3DTexGenConfig:
         self.light_remover_ckpt_path = light_remover_ckpt_path
         self.multiview_ckpt_path = multiview_ckpt_path
 
-        self.candidate_camera_azims = [0, 90, 180, 270, 0, 180]
-        self.candidate_camera_elevs = [0, 0, 0, 0, 90, -90]
-        self.candidate_view_weights = [1, 0.1, 0.5, 0.1, 0.05, 0.05]
+        self.camera_poses = []
+        self.candidate_camera_azims = []
+        self.candidate_camera_elevs = []
+        self.candidate_view_weights = []
 
+        self.multiview_resolution = 512
         self.render_size = 2048
         self.texture_size = 2048
         self.bake_exp = 4
@@ -48,11 +50,38 @@ class Hunyuan3DTexGenConfig:
 
         self.pipe_dict = {'hunyuan3d-paint-v2-0': 'hunyuanpaint', 'hunyuan3d-paint-v2-0-turbo': 'hunyuanpaint-turbo'}
         self.pipe_name = self.pipe_dict[subfolder_name]
+    
+    def set_multiview_options(self, multiview_res, multiview_image_keys):
+        self.multiview_resolution = multiview_res
+        self.multiview_image_keys = multiview_image_keys
+
+        candidate_camera_poses = [
+            { "elev": 0, "azim": 0, "weight": 1.0, "name": "front" },
+            { "elev": 0, "azim": 90, "weight": 0.1, "name": "right" },
+            { "elev": 0, "azim": 180, "weight": 0.5, "name": "back" },
+            { "elev": 0, "azim": 270, "weight": 0.1, "name": "left" },
+            { "elev": 90, "azim": 0, "weight": 0.05, "name": "top" },
+            { "elev": -90, "azim": 180, "weight": 0.05, "name": "bottom" },
+            { "elev": 0, "azim": 45, "weight": 0.25, "name": "front-right" },
+            { "elev": 0, "azim": 135, "weight": 0.25, "name": "back-right" },
+            { "elev": 0, "azim": 225, "weight": 0.25, "name": "back-left" },
+            { "elev": 0, "azim": 315, "weight": 0.25, "name": "front-left" },
+        ]
+
+        self.camera_poses = []
+        for pose in candidate_camera_poses:
+            if self.multiview_image_keys[pose['name']]:
+                self.camera_poses.append(pose)
+        
+        self.candidate_camera_azims = [pose['azim'] for pose in self.camera_poses]
+        self.candidate_camera_elevs = [pose['elev'] for pose in self.camera_poses]
+        self.candidate_view_weights = [pose['weight'] for pose in self.camera_poses]
 
 
 class Hunyuan3DPaintPipeline:
+    
     @classmethod
-    def from_pretrained(cls, model_path, subfolder='hunyuan3d-paint-v2-0-turbo'):        
+    def from_pretrained(cls, model_path, subfolder='hunyuan3d-paint-v2-0'):        
         if not os.path.exists(model_path):
             print(f"Model path {model_path} not found, quitting...")
             sys.exit()
@@ -61,7 +90,7 @@ class Hunyuan3DPaintPipeline:
         multiview_model_path = os.path.join(model_path, subfolder)
         return cls(Hunyuan3DTexGenConfig(delight_model_path, multiview_model_path, subfolder))
 
-    def __init__(self, config):
+    def __init__(self, config:Hunyuan3DTexGenConfig):
         self.config = config
         self.models = {}
         self.render = MeshRender(
@@ -70,11 +99,14 @@ class Hunyuan3DPaintPipeline:
 
         self.load_models()
 
+    def set_multiview_options(self, multiview_res, multiview_image_keys):
+        self.config.set_multiview_options(multiview_res, multiview_image_keys)
+
     def load_models(self):
         # empty cude cache
         torch.cuda.empty_cache()
         # Load model
-        self.models['delight_model'] = Light_Shadow_Remover(self.config)
+        # self.models['delight_model'] = Light_Shadow_Remover(self.config)
         self.models['multiview_model'] = Multiview_Diffusion_Net(self.config)
         # self.models['super_model'] = Image_Super_Net(self.config)
 
@@ -162,7 +194,9 @@ class Hunyuan3DPaintPipeline:
         return new_image
 
     @torch.no_grad()
-    def __call__(self, mesh, image):
+    def __call__(self, mesh, image, multiview_res, multiview_image_keys):
+        self.config.set_multiview_options(multiview_res, multiview_image_keys)
+        self.models['multiview_model'].update_config(self.config)
 
         if not isinstance(image, List):
             image = [image]
@@ -175,9 +209,9 @@ class Hunyuan3DPaintPipeline:
                 image_prompt = image[i]
             images_prompt.append(image_prompt)
             
-        images_prompt = [self.recenter_image(image_prompt) for image_prompt in images_prompt]
+        images_prompt = [self.recenter_image(image_prompt, border_ratio=0) for image_prompt in images_prompt]
 
-        images_prompt = [self.models['delight_model'](image_prompt) for image_prompt in images_prompt]
+        # images_prompt = [self.models['delight_model'](image_prompt) for image_prompt in images_prompt]
 
         mesh = mesh_uv_wrap(mesh)
 
@@ -191,15 +225,38 @@ class Hunyuan3DPaintPipeline:
         position_maps = self.render_position_multiview(
             selected_camera_elevs, selected_camera_azims)
 
-        camera_info = [(((azim // 30) + 9) % 12) // {-20: 1, 0: 1, 20: 1, -90: 3, 90: 3}[
-            elev] + {-20: 0, 0: 12, 20: 24, -90: 36, 90: 40}[elev] for azim, elev in
+        camera_info = [(((azim // 30) + 9) % 12) // {-20: 1, 0: 1, 20: 1, -90: 3, 90: 3}[elev] + 
+                       {-20: 0, 0: 12, 20: 24, -90: 36, 90: 40}[elev] for azim, elev in
                        zip(selected_camera_azims, selected_camera_elevs)]
-        multiviews = self.models['multiview_model'](images_prompt, normal_maps + position_maps, camera_info)
+        
+        
+        # Split the multiviews into batches to avoid OOM
+        batch_size = 2
+        multiviews = []
+        for i in range(0, len(camera_info), batch_size):
+            normal_map = normal_maps[i:i+batch_size]
+            position_map = position_maps[i:i+batch_size]
+            camera_info_batch = camera_info[i:i+batch_size]
+
+            multiview = self.models['multiview_model'](images_prompt, normal_map + position_map, camera_info_batch)
+            temparray = np.array(multiview)
+            print(temparray.shape, "multiviews generated for batch", i // batch_size)
+            
+            multiviews.extend(multiview)
+
+        # multiviews = self.models['multiview_model'](images_prompt, normal_maps + position_maps, camera_info)
+
+        temparray = np.array(multiviews)
+        print(temparray.shape, "multiviews generated")
 
         for i in range(len(multiviews)):
             # multiviews[i] = self.models['super_model'](multiviews[i])
             multiviews[i] = multiviews[i].resize(
                 (self.config.render_size, self.config.render_size))
+
+            with open(f'multiviews_{i}.png', 'wb') as f:
+                multiviews[i].save(f)
+                
 
         texture, mask = self.bake_from_multiview(multiviews,
                                                  selected_camera_elevs, selected_camera_azims, selected_view_weights,
