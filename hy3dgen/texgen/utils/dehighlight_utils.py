@@ -63,12 +63,14 @@ class Light_Shadow_Remover():
         else: 
             corrected_bgr = torch.cat([corrected_bgr, alpha_channel], dim=-1)
 
+        print("CORRECTED")
+        print(corrected_bgr.shape)
         return corrected_bgr
 
     @torch.no_grad()
     def __call__(self, image):
 
-        image = image.resize((512, 512))
+        image = image.resize((1344, 1344))
 
         if image.mode == 'RGBA':
             image_array = np.array(image)
@@ -94,17 +96,24 @@ class Light_Shadow_Remover():
             prompt="",
             image=image,
             generator=torch.manual_seed(42),
-            height=512,
-            width=512,
+            height=1344,
+            width=1344,
             num_inference_steps=50,
             image_guidance_scale=self.cfg_image,
             guidance_scale=self.cfg_text,
         ).images[0]
 
-        image_tensor = torch.tensor(np.array(image)/255.0).to(self.device)
+        # with open('weird_one.png', 'wb') as f:
+            # image.save(f)
+        image = np.array(image)
+
+        image_tensor = torch.tensor(image/255.0).to(self.device)
         rgb_src = image_tensor[:,:,:3]
         image = self.recorrect_rgb(rgb_src, rgb_target, alpha)
         image = image[:,:,:3]*image[:,:,3:] + torch.ones_like(image[:,:,:3])*(1.0-image[:,:,3:])
         image = Image.fromarray((image.cpu().numpy()*255).astype(np.uint8))
+
+        # with open('corrected_one.png', 'wb') as f:
+            # image.save(f)
 
         return image

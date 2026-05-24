@@ -20,6 +20,7 @@ import torch
 from PIL import Image
 from typing import List, Union, Optional
 import sys
+import cv2
 
 from .differentiable_renderer.mesh_render import MeshRender
 from .utils.dehighlight_utils import Light_Shadow_Remover
@@ -209,7 +210,12 @@ class Hunyuan3DPaintPipeline:
                 image_prompt = image[i]
             images_prompt.append(image_prompt)
             
+        # Save image prompt
+        image_prompt.save('image_prompt.png')
+    
         images_prompt = [self.recenter_image(image_prompt, border_ratio=0) for image_prompt in images_prompt]
+        print(f"Image size: {images_prompt[0].size}")
+
 
         # images_prompt = [self.models['delight_model'](image_prompt) for image_prompt in images_prompt]
 
@@ -231,7 +237,7 @@ class Hunyuan3DPaintPipeline:
         
         
         # Split the multiviews into batches to avoid OOM
-        batch_size = 2
+        batch_size = 6
         multiviews = []
         for i in range(0, len(camera_info), batch_size):
             normal_map = normal_maps[i:i+batch_size]
@@ -263,8 +269,19 @@ class Hunyuan3DPaintPipeline:
                                                  method=self.config.merge_method)
 
         mask_np = (mask.squeeze(-1).cpu().numpy() * 255).astype(np.uint8)
+        mask_cv = np.array(mask_np, dtype=np.uint8)
+        cv2.imwrite('mask.png', mask_cv)
+        print_tex = (texture.cpu().numpy() * 255).astype(np.uint8)
+        print_tex = np.clip(print_tex, 0, 255).astype(np.uint8)
+        print_tex = cv2.cvtColor(print_tex, cv2.COLOR_RGB2BGR)
+        cv2.imwrite('texture.png', print_tex)
 
         texture = self.texture_inpaint(texture, mask_np)
+
+        print_tex = (texture.cpu().numpy() * 255).astype(np.uint8)
+        print_tex = np.clip(print_tex, 0, 255).astype(np.uint8)
+        print_tex = cv2.cvtColor(print_tex, cv2.COLOR_RGB2BGR)
+        cv2.imwrite('texture_inpainted.png', print_tex)
 
         self.render.set_texture(texture)
         textured_mesh = self.render.save_mesh()

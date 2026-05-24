@@ -477,7 +477,7 @@ def build_app():
                     with gr.Tab('Advanced Options', id='tab_advanced_options'):
                         with gr.Row():
                             check_box_rembg = gr.Checkbox(value=True, label='Remove Background', min_width=100)
-                            randomize_seed = gr.Checkbox(label="Randomize seed", value=True, min_width=100)
+                            randomize_seed = gr.Checkbox(label="Randomize seed", value=False, min_width=100)
                         seed = gr.Slider(
                             label="Seed",
                             minimum=0,
@@ -498,7 +498,7 @@ def build_app():
                                                    label='Number of Chunks', min_width=100)
                         
                         # Texture Generation Options    
-                        multiview_res = gr.Slider(maximum=4096, minimum=256, value=512, label='Multiview Texgen Resolution')
+                        multiview_res = gr.Slider(maximum=4096, minimum=256, value=768, label='Multiview Texgen Resolution')
 
                         with gr.Row(elem_classes="force-row"):
                             with gr.Column(elem_classes="column"):
@@ -801,17 +801,7 @@ if __name__ == '__main__':
     degenerate_face_remove_worker = DegenerateFaceRemover()
     face_reduce_worker = FaceReducer()
 
-    # https://discuss.huggingface.co/t/how-to-serve-an-html-file/33921/2
-    # create a FastAPI app
-    app = FastAPI()
-    # create a static directory to store the static files
-    static_dir = Path(SAVE_DIR).absolute()
-    static_dir.mkdir(parents=True, exist_ok=True)
-    app.mount("/static", StaticFiles(directory=static_dir, html=True), name="static")
-    shutil.copytree('./assets/env_maps', os.path.join(static_dir, 'env_maps'), dirs_exist_ok=True)
-
-    if args.low_vram_mode:
-        torch.cuda.empty_cache()
+    # build Gradio app
     demo = build_app()
-    app = gr.mount_gradio_app(app, demo, path="/")
-    uvicorn.run(app, host=args.host, port=args.port, workers=1)
+    # host locally without FastAPI
+    demo.launch(server_name=args.host, server_port=args.port)
